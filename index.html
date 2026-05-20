@@ -119,6 +119,26 @@
       font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
       text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
     }
+    .lang-tag {
+      display: inline-flex; align-items: center; gap: 3px;
+      font-size: 11px; font-weight: 600;
+      background: rgba(255,107,53,0.13); color: var(--accent2);
+      border-radius: 4px; padding: 2px 7px;
+    }
+    /* ── Language filter bar ── */
+    .lang-bar {
+      display: flex; gap: 8px; overflow-x: auto; padding: 8px 24px;
+      scrollbar-width: none; background: var(--bg);
+      border-bottom: 1px solid var(--border);
+    }
+    .lang-bar::-webkit-scrollbar { display: none; }
+    .lang-chip {
+      flex-shrink: 0; background: var(--card); border: 1px solid var(--border);
+      border-radius: 20px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+      transition: all 0.15s; color: var(--muted); white-space: nowrap;
+    }
+    .lang-chip:hover { border-color: var(--accent2); color: var(--text); }
+    .lang-chip.active { background: rgba(255,107,53,0.2); border-color: var(--accent2); color: var(--accent2); font-weight: 600; }
 
     .card-logo {
       width: 48px; height: 48px; border-radius: 10px;
@@ -216,6 +236,10 @@
   <div class="chip local-chip" data-state="__local__">📍 Mangalore &amp; Udupi</div>
 </div>
 
+<div class="lang-bar" id="langBar" style="display:none">
+  <div class="lang-chip active" data-lang="all">All Languages</div>
+</div>
+
 <div id="status"><div class="spinner"></div><div>Loading stations…</div></div>
 <div id="main" style="display:none"></div>
 
@@ -294,11 +318,12 @@ const COUNTRIES = {
 };
 
 let activeCountry = 'India';
-let cache = {};          // cache[countryKey] = { stations, localPicks }
+let cache = {};
 let stations = [];
 let localPicks = [];
 let filtered = [];
 let activeState = 'all';
+let activeLang = 'all';
 let currentId = null;
 let currentStation = null;
 let playing = false;
@@ -384,7 +409,10 @@ async function loadCountry(country) {
   }
 
   cache[country] = { stations, localPicks };
-  buildStateChips(); applyFilter();
+  activeLang = 'all';
+  buildStateChips();
+  buildLangChips();
+  applyFilter();
   document.getElementById('status').style.display = 'none';
   document.getElementById('main').style.display = '';
 }
@@ -432,18 +460,56 @@ function selectState(st) {
 document.querySelector('[data-state="all"]').onclick    = () => selectState('all');
 document.querySelector('[data-state="__local__"]').onclick = () => selectState('__local__');
 
+// ── Language chips ────────────────────────────────────────────────────────────
+function buildLangChips() {
+  const bar = document.getElementById('langBar');
+  [...bar.querySelectorAll('.lang-chip:not([data-lang="all"])')].forEach(c => c.remove());
+
+  const langSet = new Set();
+  for (const s of stations) {
+    (s.language || '').split(',').forEach(l => { const t = l.trim(); if (t) langSet.add(t); });
+  }
+
+  const sorted = [...langSet].sort();
+  if (!sorted.length) { bar.style.display = 'none'; return; }
+
+  bar.style.display = 'flex';
+  for (const lang of sorted) {
+    const d = document.createElement('div');
+    d.className = 'lang-chip'; d.dataset.lang = lang;
+    d.textContent = capitalise(lang);
+    d.onclick = () => selectLang(lang);
+    bar.appendChild(d);
+  }
+  document.querySelector('.lang-chip[data-lang="all"]').classList.add('active');
+}
+
+function selectLang(lang) {
+  activeLang = lang;
+  document.querySelectorAll('.lang-chip').forEach(c => c.classList.toggle('active', c.dataset.lang === lang));
+  applyFilter();
+}
+document.querySelector('.lang-chip[data-lang="all"]').onclick = () => selectLang('all');
+
+function capitalise(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
 // ── Filter ────────────────────────────────────────────────────────────────────
 document.getElementById('search').addEventListener('input', e => applyFilter(e.target.value));
 
 function applyFilter(q = document.getElementById('search').value) {
   const ql = q.toLowerCase();
+  const matchLang = s => activeLang === 'all' ||
+    (s.language || '').split(',').map(l => l.trim()).includes(activeLang);
+
   if (activeState === '__local__') {
-    filtered = localPicks.filter(s => !q || (s.name+' '+(s.state||'')+' '+(s.tags||'')).toLowerCase().includes(ql));
+    filtered = localPicks.filter(s =>
+      matchLang(s) && (!q || (s.name+' '+(s.state||'')+' '+(s.language||'')+' '+(s.tags||'')).toLowerCase().includes(ql))
+    );
   } else {
     filtered = stations.filter(s => {
       const matchState = activeState === 'all' || (s.state||'').trim() === activeState;
-      const matchQ = !q || (s.name+' '+(s.state||'')+' '+(s.tags||'')).toLowerCase().includes(ql);
-      return matchState && matchQ;
+      const matchQ = !q || (s.name+' '+(s.state||'')+' '+(s.language||'')+' '+(s.tags||'')).toLowerCase().includes(ql);
+      return matchState && matchQ && matchLang(s);
     });
   }
   render();
@@ -485,6 +551,11 @@ function cardHTML(s) {
   const imgTag = s.favicon
     ? `<img src="${esc(s.favicon)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
     : '';
+  const langs = (s.language || '').split(',').map(l => l.trim()).filter(Boolean);
+  const langTag = langs.length
+    ? `<span class="lang-tag">🗣 ${esc(langs.map(capitalise).join(', '))}</span>`
+    : '';
+  const stateLine = [s.state, s.tags ? s.tags.split(',')[0].trim() : ''].filter(Boolean).join(' · ');
   return `
     <div class="card${currentId===s.stationuuid?' playing':''}${s._isLocal?' local':''}"
          onclick="selectStation('${id}')" id="card-${id}">
@@ -494,10 +565,10 @@ function cardHTML(s) {
         <span class="fallback" ${s.favicon?'style="display:none"':''}>${fallback}</span>
       </div>
       <div class="card-name">${esc(s.name.trim())}</div>
+      ${langTag}
       <div class="card-meta">
-        ${s.state?`<span>${esc(s.state)}</span>`:''}
-        ${s.state&&(s.tags||br)?'<span class="dot"></span>':''}
-        ${s.tags?`<span>${esc(s.tags.split(',')[0].trim())}</span>`:''}
+        ${stateLine ? `<span>${esc(stateLine)}</span>` : ''}
+        ${stateLine && br ? '<span class="dot"></span>' : ''}
         ${br}
       </div>
       <div class="play-badge">
