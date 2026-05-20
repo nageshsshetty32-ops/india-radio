@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>India Radio</title>
+  <title>Nagesh Radio</title>
   <!-- HLS.js: Chrome/Firefox don't natively decode .m3u8 — this fixes the buffering -->
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.7/dist/hls.min.js"></script>
   <style>
@@ -27,6 +27,23 @@
     }
     .logo { font-size: 20px; font-weight: 800; color: var(--accent); letter-spacing: -0.5px; flex-shrink: 0; }
     .logo span { color: var(--text); }
+
+    /* ── Country tabs ── */
+    .country-bar {
+      display: flex; gap: 0; background: #0d0d11;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto; scrollbar-width: none;
+    }
+    .country-bar::-webkit-scrollbar { display: none; }
+    .country-tab {
+      flex-shrink: 0; padding: 11px 22px;
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      color: var(--muted); border-bottom: 3px solid transparent;
+      transition: all 0.15s; display: flex; align-items: center; gap: 8px;
+      white-space: nowrap;
+    }
+    .country-tab:hover { color: var(--text); }
+    .country-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     #search {
       flex: 1; max-width: 360px; background: var(--card);
       border: 1px solid var(--border); border-radius: 8px;
@@ -184,12 +201,18 @@
 <body>
 
 <header>
-  <div class="logo">India<span>Radio</span></div>
+  <div class="logo">Nagesh<span>Radio</span></div>
   <input id="search" type="search" placeholder="Search stations, cities, languages…" />
 </header>
 
+<div class="country-bar" id="countryBar">
+  <div class="country-tab active" data-country="India">🇮🇳 India</div>
+  <div class="country-tab" data-country="The United States Of America">🇺🇸 USA</div>
+  <div class="country-tab" data-country="Indonesia">🇮🇩 Indonesia</div>
+</div>
+
 <div class="state-bar" id="stateBar">
-  <div class="chip active" data-state="all">All India</div>
+  <div class="chip active" data-state="all">All</div>
   <div class="chip local-chip" data-state="__local__">📍 Mangalore &amp; Udupi</div>
 </div>
 
@@ -200,7 +223,7 @@
   <div id="pLogo"><span style="font-size:20px;color:var(--accent)">♪</span></div>
   <div id="player-info">
     <div id="player-name">Select a station</div>
-    <div id="player-meta">India Radio</div>
+    <div id="player-meta">Nagesh Radio</div>
   </div>
   <div id="player-controls">
     <div id="player-status">—</div>
@@ -220,7 +243,7 @@
 <audio id="audio" preload="none"></audio>
 
 <script>
-// ── HLS player setup ──────────────────────────────────────────────────────────
+// ── HLS player ────────────────────────────────────────────────────────────────
 const audio = document.getElementById('audio');
 let hlsInst = null;
 
@@ -229,19 +252,12 @@ function isHLS(url) { return url && (url.includes('.m3u8') || url.includes('hls'
 function attachStream(url) {
   if (hlsInst) { hlsInst.destroy(); hlsInst = null; }
   audio.pause(); audio.src = '';
-
   if (Hls.isSupported() && isHLS(url)) {
     hlsInst = new Hls({
-      maxBufferLength: 8,           // only buffer 8s (default 30s) → less wait
-      maxMaxBufferLength: 20,
-      lowLatencyMode: true,
-      liveSyncDurationCount: 2,     // stay 2 segments from live edge
-      liveMaxLatencyDurationCount: 6,
-      manifestLoadingTimeOut: 8000,
-      manifestLoadingMaxRetry: 3,
-      levelLoadingTimeOut: 8000,
-      fragLoadingTimeOut: 12000,
-      startLevel: -1,               // auto pick lowest bitrate first
+      maxBufferLength: 8, maxMaxBufferLength: 20, lowLatencyMode: true,
+      liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6,
+      manifestLoadingTimeOut: 8000, manifestLoadingMaxRetry: 3,
+      levelLoadingTimeOut: 8000, fragLoadingTimeOut: 12000, startLevel: -1,
     });
     hlsInst.loadSource(url);
     hlsInst.attachMedia(audio);
@@ -250,52 +266,54 @@ function attachStream(url) {
       if (d.fatal) { setStatus('error', '✕ Error'); updatePlayIcon(false); playing = false; }
     });
   } else if (audio.canPlayType('application/vnd.apple.mpegurl') && isHLS(url)) {
-    // Safari native HLS
-    audio.src = url;
-    audio.play().catch(() => {});
+    audio.src = url; audio.play().catch(() => {});
   } else {
-    audio.src = url;
-    audio.play().catch(() => {});
+    audio.src = url; audio.play().catch(() => {});
   }
 }
 
-// ── Stall detection: restart if frozen for >8s ──────────────────────────────
+// ── Stall detection ───────────────────────────────────────────────────────────
 let lastTime = 0, stallTimer = null;
 function startStallWatch() {
-  clearInterval(stallTimer);
-  lastTime = audio.currentTime;
+  clearInterval(stallTimer); lastTime = audio.currentTime;
   stallTimer = setInterval(() => {
     if (!playing) return;
     if (audio.currentTime === lastTime && !audio.paused) {
       setStatus('retry', '↺ Reconnecting…');
-      const cur = currentStation;
-      if (cur) { attachStream(cur.url_resolved || cur.url); }
+      if (currentStation) attachStream(currentStation.url_resolved || currentStation.url);
     }
     lastTime = audio.currentTime;
   }, 8000);
 }
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let stations = [];       // all fetched stations
-let localPicks = [];     // Mangalore/Udupi specific
+// ── App state ─────────────────────────────────────────────────────────────────
+const COUNTRIES = {
+  'India':                       { flag: '🇮🇳', label: 'India',     hasLocal: true  },
+  'The United States Of America':{ flag: '🇺🇸', label: 'USA',       hasLocal: false },
+  'Indonesia':                   { flag: '🇮🇩', label: 'Indonesia',  hasLocal: false },
+};
+
+let activeCountry = 'India';
+let cache = {};          // cache[countryKey] = { stations, localPicks }
+let stations = [];
+let localPicks = [];
 let filtered = [];
+let activeState = 'all';
 let currentId = null;
 let currentStation = null;
 let playing = false;
-let activeState = 'all';
 let retryCount = 0;
 
-// ── Fetch ─────────────────────────────────────────────────────────────────────
+// ── API ───────────────────────────────────────────────────────────────────────
 const MIRRORS = [
   'https://de1.api.radio-browser.info',
   'https://nl1.api.radio-browser.info',
   'https://at1.api.radio-browser.info',
 ];
-
 async function apiFetch(path) {
   for (const base of MIRRORS) {
     try {
-      const r = await fetch(base + path, { headers: { 'User-Agent': 'IndiaRadioApp/1.0' } });
+      const r = await fetch(base + path, { headers: { 'User-Agent': 'NageshRadioApp/1.0' } });
       const j = await r.json();
       if (j && j.length) return j;
     } catch (_) {}
@@ -303,80 +321,115 @@ async function apiFetch(path) {
   return [];
 }
 
-async function loadStations() {
-  // Parallel: main India list + Mangalore/Udupi targeted searches
-  const [main, byManga, byUdupi, byMangaluru, byMisty, byAIRmanga] = await Promise.all([
-    apiFetch('/json/stations/bycountry/India?limit=500&hidebroken=true&order=votes&reverse=true'),
-    apiFetch('/json/stations/search?country=India&name=mangalore&hidebroken=true'),
-    apiFetch('/json/stations/search?country=India&name=udupi&hidebroken=true'),
-    apiFetch('/json/stations/search?country=India&name=mangaluru&hidebroken=true'),
-    apiFetch('/json/stations/search?country=India&name=misty&hidebroken=true'),
-    apiFetch('/json/stations/search?country=India&name=air mangalore&hidebroken=true'),
-  ]);
+// ── Load stations for a country ───────────────────────────────────────────────
+async function loadCountry(country) {
+  if (cache[country]) {
+    ({ stations, localPicks } = cache[country]);
+    buildStateChips(); applyFilter();
+    document.getElementById('status').style.display = 'none';
+    document.getElementById('main').style.display = '';
+    return;
+  }
+
+  document.getElementById('main').style.display = 'none';
+  document.getElementById('status').style.display = '';
+  document.getElementById('status').innerHTML = '<div class="spinner"></div><div>Loading stations…</div>';
+
+  const enc = encodeURIComponent(country);
+  let fetches = [
+    apiFetch(`/json/stations/bycountry/${enc}?limit=500&hidebroken=true&order=votes&reverse=true`),
+  ];
+  if (country === 'India') {
+    fetches = fetches.concat([
+      apiFetch('/json/stations/search?country=India&name=mangalore&hidebroken=true'),
+      apiFetch('/json/stations/search?country=India&name=udupi&hidebroken=true'),
+      apiFetch('/json/stations/search?country=India&name=mangaluru&hidebroken=true'),
+      apiFetch('/json/stations/search?country=India&name=misty&hidebroken=true'),
+      apiFetch('/json/stations/search?country=India&name=air+mangalore&hidebroken=true'),
+    ]);
+  }
+
+  const results = await Promise.all(fetches);
+  const main = results[0];
 
   if (!main.length) {
     document.getElementById('status').innerHTML = '<div style="color:#f87171">Could not load. Check your connection.</div>';
     return;
   }
 
-  // Deduplicate main list by name
+  // Deduplicate by name
   const seen = new Map();
   for (const s of main) {
     const k = s.name.trim().toLowerCase();
     if (!seen.has(k) || s.votes > seen.get(k).votes) seen.set(k, s);
   }
   stations = [...seen.values()];
+  localPicks = [];
 
-  // Build local picks: merge all coastal/local searches, dedupe by uuid
-  const localRaw = [...byManga, ...byUdupi, ...byMangaluru, ...byMisty, ...byAIRmanga];
-  const localSeen = new Map();
-  for (const s of localRaw) {
-    if (!localSeen.has(s.stationuuid)) {
-      s._isLocal = true;
-      localSeen.set(s.stationuuid, s);
+  if (country === 'India') {
+    const localRaw = [...results[1], ...results[2], ...results[3], ...results[4], ...results[5]];
+    const localSeen = new Map();
+    for (const s of localRaw) {
+      if (!localSeen.has(s.stationuuid)) { s._isLocal = true; localSeen.set(s.stationuuid, s); }
     }
-  }
-  // Also pull from main where name/tags/state hints at coastal Karnataka
-  for (const s of stations) {
-    const txt = (s.name + ' ' + (s.tags||'')).toLowerCase();
-    if ((txt.includes('mangalore') || txt.includes('mangaluru') || txt.includes('udupi') ||
-         txt.includes('tulu') || txt.includes('misty')) && !localSeen.has(s.stationuuid)) {
-      s._isLocal = true;
-      localSeen.set(s.stationuuid, s);
+    for (const s of stations) {
+      const txt = (s.name + ' ' + (s.tags||'')).toLowerCase();
+      if ((txt.includes('mangalore') || txt.includes('mangaluru') || txt.includes('udupi') ||
+           txt.includes('tulu') || txt.includes('misty')) && !localSeen.has(s.stationuuid)) {
+        s._isLocal = true; localSeen.set(s.stationuuid, s);
+      }
     }
-  }
-  localPicks = [...localSeen.values()];
-  // Mark them in main list too
-  for (const s of stations) {
-    if (localSeen.has(s.stationuuid)) s._isLocal = true;
+    localPicks = [...localSeen.values()];
+    for (const s of stations) { if (localSeen.has(s.stationuuid)) s._isLocal = true; }
   }
 
-  buildStateChips();
-  applyFilter();
+  cache[country] = { stations, localPicks };
+  buildStateChips(); applyFilter();
   document.getElementById('status').style.display = 'none';
   document.getElementById('main').style.display = '';
 }
 
+// ── Country tabs ──────────────────────────────────────────────────────────────
+document.querySelectorAll('.country-tab').forEach(tab => {
+  tab.onclick = () => {
+    const c = tab.dataset.country;
+    if (c === activeCountry) return;
+    activeCountry = c;
+    document.querySelectorAll('.country-tab').forEach(t => t.classList.toggle('active', t.dataset.country === c));
+    // Show/hide the local chip
+    const localChip = document.querySelector('[data-state="__local__"]');
+    localChip.style.display = COUNTRIES[c].hasLocal ? '' : 'none';
+    // Reset state filter
+    activeState = 'all';
+    document.getElementById('search').value = '';
+    loadCountry(c);
+  };
+});
+
 // ── State chips ───────────────────────────────────────────────────────────────
 function buildStateChips() {
   const stBar = document.getElementById('stateBar');
+  // Remove old dynamic chips (keep first two: All + Local)
+  [...stBar.querySelectorAll('.chip:not([data-state="all"]):not([data-state="__local__"])')].forEach(c => c.remove());
+
   const statesSet = new Set();
   for (const s of stations) { const st = (s.state||'').trim(); if (st) statesSet.add(st); }
-  const sorted = [...statesSet].sort();
-  for (const st of sorted) {
-    if (stBar.querySelector(`[data-state="${CSS.escape(st)}"]`)) continue;
+  for (const st of [...statesSet].sort()) {
     const d = document.createElement('div');
     d.className = 'chip'; d.dataset.state = st; d.textContent = st;
     d.onclick = () => selectState(st);
     stBar.appendChild(d);
   }
+  // Sync active highlight
+  document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.state === activeState));
 }
+
 function selectState(st) {
   activeState = st;
   document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c.dataset.state === st));
   applyFilter();
 }
-document.querySelector('[data-state="all"]').onclick = () => selectState('all');
+document.querySelector('[data-state="all"]').onclick    = () => selectState('all');
 document.querySelector('[data-state="__local__"]').onclick = () => selectState('__local__');
 
 // ── Filter ────────────────────────────────────────────────────────────────────
@@ -385,9 +438,7 @@ document.getElementById('search').addEventListener('input', e => applyFilter(e.t
 function applyFilter(q = document.getElementById('search').value) {
   const ql = q.toLowerCase();
   if (activeState === '__local__') {
-    filtered = localPicks.filter(s =>
-      !q || (s.name+' '+(s.state||'')+' '+(s.tags||'')).toLowerCase().includes(ql)
-    );
+    filtered = localPicks.filter(s => !q || (s.name+' '+(s.state||'')+' '+(s.tags||'')).toLowerCase().includes(ql));
   } else {
     filtered = stations.filter(s => {
       const matchState = activeState === 'all' || (s.state||'').trim() === activeState;
@@ -402,49 +453,45 @@ function applyFilter(q = document.getElementById('search').value) {
 function render() {
   const main = document.getElementById('main');
   if (!filtered.length) {
-    main.innerHTML = '<div id="status" style="display:block;text-align:center;padding:60px 24px;color:var(--muted)">No stations found for this filter.</div>';
+    main.innerHTML = '<div style="text-align:center;padding:60px 24px;color:var(--muted)">No stations found.</div>';
     return;
   }
-
+  const countryLabel = COUNTRIES[activeCountry]?.label || activeCountry;
   let html = '';
-
   if (activeState === 'all' || activeState === '__local__') {
     const locals = activeState === '__local__' ? filtered : filtered.filter(s => s._isLocal);
-    if (locals.length) {
+    if (locals.length && COUNTRIES[activeCountry].hasLocal) {
       html += `<div class="section-label"><span class="pin">📍</span> Mangalore &amp; Udupi — Local Picks</div>`;
       html += `<div class="grid">${locals.map(cardHTML).join('')}</div>`;
     }
     if (activeState === 'all') {
       const rest = filtered.filter(s => !s._isLocal);
       if (rest.length) {
-        html += `<div class="section-label">All India</div>`;
+        html += `<div class="section-label">All ${countryLabel}</div>`;
         html += `<div class="grid">${rest.map(cardHTML).join('')}</div>`;
       }
     }
   } else {
     html += `<div class="grid">${filtered.map(cardHTML).join('')}</div>`;
   }
-
   main.innerHTML = html;
 }
 
 function cardHTML(s) {
   const id = esc(s.stationuuid);
-  const isPlaying = currentId === s.stationuuid;
   const br = s.bitrate ? `<span class="bitrate-tag">${s.bitrate}k</span>` : '';
   const localBadge = s._isLocal ? '<div class="local-badge">LOCAL</div>' : '';
-  const fallbackChar = esc(s.name.trim().charAt(0).toUpperCase());
+  const fallback = esc(s.name.trim().charAt(0).toUpperCase());
   const imgTag = s.favicon
-    ? `<img src="${esc(s.favicon)}" alt="" loading="lazy"
-            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+    ? `<img src="${esc(s.favicon)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
     : '';
   return `
-    <div class="card${isPlaying?' playing':''}${s._isLocal?' local':''}"
+    <div class="card${currentId===s.stationuuid?' playing':''}${s._isLocal?' local':''}"
          onclick="selectStation('${id}')" id="card-${id}">
       ${localBadge}
       <div class="card-logo">
         ${imgTag}
-        <span class="fallback" ${s.favicon?'style="display:none"':''}>${fallbackChar}</span>
+        <span class="fallback" ${s.favicon?'style="display:none"':''}>${fallback}</span>
       </div>
       <div class="card-name">${esc(s.name.trim())}</div>
       <div class="card-meta">
@@ -467,19 +514,15 @@ function esc(v) {
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 function selectStation(id) {
-  const allStations = [...stations, ...localPicks];
-  const s = allStations.find(x => x.stationuuid === id);
+  const pool = [...stations, ...localPicks];
+  const s = pool.find(x => x.stationuuid === id);
   if (!s) return;
 
-  if (currentId) {
-    const prev = document.getElementById('card-' + currentId);
-    if (prev) prev.classList.remove('playing');
-  }
+  if (currentId) { const p = document.getElementById('card-'+currentId); if (p) p.classList.remove('playing'); }
   currentId = id; currentStation = s; retryCount = 0;
-  const card = document.getElementById('card-' + id);
+  const card = document.getElementById('card-'+id);
   if (card) card.classList.add('playing');
 
-  // Player bar
   const pLogo = document.getElementById('pLogo');
   pLogo.innerHTML = s.favicon
     ? `<img src="${esc(s.favicon)}" style="width:100%;height:100%;object-fit:cover;border-radius:10px"
@@ -487,62 +530,44 @@ function selectStation(id) {
     : `<span style="font-size:20px;color:var(--accent)">${esc(s.name.charAt(0).toUpperCase())}</span>`;
   document.getElementById('player-name').textContent = s.name.trim();
   document.getElementById('player-meta').textContent =
-    [s.state, s.tags ? s.tags.split(',')[0].trim() : '', s.bitrate ? s.bitrate + 'kbps' : '']
-      .filter(Boolean).join(' · ') || 'India';
+    [s.state, s.tags?s.tags.split(',')[0].trim():'', s.bitrate?s.bitrate+'kbps':''].filter(Boolean).join(' · ')
+    || COUNTRIES[activeCountry]?.label || activeCountry;
 
-  setStatus('loading', '⏳ Connecting…');
-  updatePlayIcon(false);
-  playing = false;
-
-  const url = s.url_resolved || s.url;
+  setStatus('loading', '⏳ Connecting…'); updatePlayIcon(false); playing = false;
   audio.volume = parseFloat(document.getElementById('volume').value);
-  attachStream(url);
+  attachStream(s.url_resolved || s.url);
   startStallWatch();
 }
 
 function togglePlay() {
   if (!currentId) return;
   if (playing) {
-    audio.pause();
-    updatePlayIcon(false); setStatus('', '—'); playing = false;
-    clearInterval(stallTimer);
+    audio.pause(); updatePlayIcon(false); setStatus('', '—'); playing = false; clearInterval(stallTimer);
   } else {
     setStatus('loading', '⏳ Connecting…');
-    const url = currentStation.url_resolved || currentStation.url;
-    attachStream(url);
+    attachStream(currentStation.url_resolved || currentStation.url);
     startStallWatch();
   }
 }
 
 function updatePlayIcon(p) {
-  document.getElementById('playIcon').setAttribute('d',
-    p ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z'
-  );
+  document.getElementById('playIcon').setAttribute('d', p ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
 }
-function setStatus(cls, text) {
-  const el = document.getElementById('player-status');
-  el.className = cls; el.textContent = text;
-}
-function setVolume(v) { audio.volume = v; if (hlsInst) {} }
+function setStatus(cls, text) { const el = document.getElementById('player-status'); el.className = cls; el.textContent = text; }
+function setVolume(v) { audio.volume = v; }
 
-audio.addEventListener('playing', () => {
-  setStatus('live', '● LIVE'); updatePlayIcon(true); playing = true;
-});
+audio.addEventListener('playing', () => { setStatus('live', '● LIVE'); updatePlayIcon(true); playing = true; });
 audio.addEventListener('waiting', () => { if (playing) setStatus('loading', '⏳ Buffering…'); });
 audio.addEventListener('error', () => {
   if (retryCount < 2) {
     retryCount++;
     setStatus('retry', `↺ Retry ${retryCount}…`);
-    setTimeout(() => {
-      if (currentStation) attachStream(currentStation.url_resolved || currentStation.url);
-    }, 2000);
-  } else {
-    setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false;
-  }
+    setTimeout(() => { if (currentStation) attachStream(currentStation.url_resolved || currentStation.url); }, 2000);
+  } else { setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false; }
 });
 audio.addEventListener('pause', () => { if (!playing) updatePlayIcon(false); });
 
-loadStations();
+loadCountry('India');
 </script>
 </body>
 </html>
