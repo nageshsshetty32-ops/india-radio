@@ -324,35 +324,77 @@ const COUNTRIES = {
 };
 
 let activeCountry = 'India';
-// Hardcoded verified Mangalore stations (confirmed working stream URLs)
-const MANGALORE_HARDCODED = [
+// Hardcoded verified Karnataka stations — Radio Browser has only 5 tagged entries for this state
+const KARNATAKA_HARDCODED = [
+  // ── Mangalore / Coastal ──────────────────────────────────────────────────────
   {
     stationuuid: 'hc-air-mangalore',
     name: 'AIR Mangalore (Akashvani)',
-    state: 'Karnataka',
-    language: 'kannada,tulu,konkani',
-    tags: 'mangalore,news,mangaluru,air,akashvani',
+    state: 'Karnataka', language: 'kannada,tulu,konkani',
+    tags: 'mangalore,mangaluru,air,akashvani,coastal karnataka',
     url: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio073/playlist.m3u8',
     url_resolved: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio073/playlist.m3u8',
-    favicon: '',
-    bitrate: 48,
-    _isLocal: true,
-    _verified: true,
+    favicon: '', bitrate: 48, votes: 999, _isLocal: true, _verified: true,
   },
   {
     stationuuid: 'hc-amchi-konkani',
     name: 'Radio AmchiKONKANI',
-    state: 'Karnataka',
-    language: 'konkani',
+    state: 'Karnataka', language: 'konkani',
     tags: 'mangalore,konkani,coastal,christian,devotional',
     url: 'http://178.32.107.151:3711/stream',
     url_resolved: 'http://178.32.107.151:3711/stream',
-    favicon: '',
-    bitrate: 0,
-    _isLocal: true,
-    _verified: true,
+    favicon: '', bitrate: 96, votes: 137, _isLocal: true, _verified: true,
+  },
+  // ── Bangalore ────────────────────────────────────────────────────────────────
+  {
+    stationuuid: 'hc-air-bangalore',
+    name: 'AIR Bangalore (Akashvani Karnataka)',
+    state: 'Karnataka', language: 'kannada',
+    tags: 'bangalore,bengaluru,air,akashvani,kannada',
+    url: 'https://airhlspush.pc.cdn.bitgravity.com/httppush/hlspbaudio030/hlspbaudio030_Auto.m3u8',
+    url_resolved: 'https://airhlspush.pc.cdn.bitgravity.com/httppush/hlspbaudio030/hlspbaudio030_Auto.m3u8',
+    favicon: '', bitrate: 32, votes: 138, _isLocal: false, _verified: true,
+  },
+  {
+    stationuuid: 'hc-radio-indigo',
+    name: 'Radio Indigo 91.9 FM Bangalore',
+    state: 'Karnataka', language: 'english',
+    tags: 'bangalore,bengaluru,english,international,pop',
+    url: 'https://a5.asurahosting.com:8600/radio.mp3',
+    url_resolved: 'https://a5.asurahosting.com:8600/radio.mp3',
+    favicon: '', bitrate: 128, votes: 0, _isLocal: false, _verified: true,
+  },
+  {
+    stationuuid: 'hc-sandesh-radio',
+    name: 'Sandesh Radio',
+    state: 'Karnataka', language: 'hindi,kannada',
+    tags: 'bangalore,classical,hindustani,indian classical music',
+    url: 'http://radio.garden/api/ara/content/listen/Myo7zNpV/channel.mp3',
+    url_resolved: 'http://radio.garden/api/ara/content/listen/Myo7zNpV/channel.mp3',
+    favicon: '', bitrate: 128, votes: 436, _isLocal: false, _verified: true,
+  },
+  // ── Other Karnataka ───────────────────────────────────────────────────────────
+  {
+    stationuuid: 'hc-air-madikeri',
+    name: 'AIR Madikeri (Coorg)',
+    state: 'Karnataka', language: 'kannada,kodava',
+    tags: 'madikeri,coorg,kodagu,air,akashvani',
+    url: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio068/playlist.m3u8',
+    url_resolved: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio068/playlist.m3u8',
+    favicon: '', bitrate: 126, votes: 67, _isLocal: false, _verified: true,
+  },
+  {
+    stationuuid: 'hc-air-dharwad',
+    name: 'AIR Dharwad',
+    state: 'Karnataka', language: 'kannada',
+    tags: 'dharwad,hubli,air,akashvani,north karnataka',
+    url: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio150/playlist.m3u8',
+    url_resolved: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio150/playlist.m3u8',
+    favicon: '', bitrate: 119, votes: 119, _isLocal: false, _verified: true,
   },
 ];
+// Keep old name pointing to same array for local picks merge below
+const MANGALORE_HARDCODED = KARNATAKA_HARDCODED;
 
 let cache = {};
 let stations = [];
@@ -418,12 +460,21 @@ async function loadCountry(country) {
     return;
   }
 
-  // Deduplicate by name
+  // Deduplicate API results by name
   const seen = new Map();
   for (const s of main) {
     const k = s.name.trim().toLowerCase();
     if (!seen.has(k) || s.votes > seen.get(k).votes) seen.set(k, s);
   }
+
+  // For India: inject all hardcoded Karnataka stations into the main pool
+  // (Radio Browser has only 5 Karnataka-tagged entries — badly under-populated)
+  if (country === 'India') {
+    for (const s of KARNATAKA_HARDCODED) {
+      if (!seen.has(s.name.toLowerCase())) seen.set(s.name.toLowerCase(), s);
+    }
+  }
+
   stations = [...seen.values()];
   localPicks = [];
 
@@ -440,9 +491,9 @@ async function loadCountry(country) {
         s._isLocal = true; localSeen.set(s.stationuuid, s);
       }
     }
-    // Merge hardcoded verified stations first, then API results
+    // Merge hardcoded verified stations first (Mangalore/local ones), then API results
     const mergedLocal = new Map();
-    for (const s of MANGALORE_HARDCODED) mergedLocal.set(s.stationuuid, s);
+    for (const s of KARNATAKA_HARDCODED.filter(s => s._isLocal)) mergedLocal.set(s.stationuuid, s);
     for (const [k, v] of localSeen) if (!mergedLocal.has(k)) mergedLocal.set(k, v);
     localPicks = [...mergedLocal.values()];
     for (const s of stations) { if (localSeen.has(s.stationuuid)) s._isLocal = true; }
