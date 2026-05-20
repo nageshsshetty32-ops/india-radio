@@ -119,6 +119,12 @@
       font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
       text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
     }
+    .verified-badge {
+      position: absolute; top: 10px; right: 10px;
+      background: #1a3a5a; color: #5ab4f0;
+      font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+    }
     .lang-tag {
       display: inline-flex; align-items: center; gap: 3px;
       font-size: 11px; font-weight: 600;
@@ -318,6 +324,36 @@ const COUNTRIES = {
 };
 
 let activeCountry = 'India';
+// Hardcoded verified Mangalore stations (confirmed working stream URLs)
+const MANGALORE_HARDCODED = [
+  {
+    stationuuid: 'hc-air-mangalore',
+    name: 'AIR Mangalore (Akashvani)',
+    state: 'Karnataka',
+    language: 'kannada,tulu,konkani',
+    tags: 'mangalore,news,mangaluru,air,akashvani',
+    url: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio073/playlist.m3u8',
+    url_resolved: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio073/playlist.m3u8',
+    favicon: '',
+    bitrate: 48,
+    _isLocal: true,
+    _verified: true,
+  },
+  {
+    stationuuid: 'hc-amchi-konkani',
+    name: 'Radio AmchiKONKANI',
+    state: 'Karnataka',
+    language: 'konkani',
+    tags: 'mangalore,konkani,coastal,christian,devotional',
+    url: 'http://178.32.107.151:3711/stream',
+    url_resolved: 'http://178.32.107.151:3711/stream',
+    favicon: '',
+    bitrate: 0,
+    _isLocal: true,
+    _verified: true,
+  },
+];
+
 let cache = {};
 let stations = [];
 let localPicks = [];
@@ -404,7 +440,11 @@ async function loadCountry(country) {
         s._isLocal = true; localSeen.set(s.stationuuid, s);
       }
     }
-    localPicks = [...localSeen.values()];
+    // Merge hardcoded verified stations first, then API results
+    const mergedLocal = new Map();
+    for (const s of MANGALORE_HARDCODED) mergedLocal.set(s.stationuuid, s);
+    for (const [k, v] of localSeen) if (!mergedLocal.has(k)) mergedLocal.set(k, v);
+    localPicks = [...mergedLocal.values()];
     for (const s of stations) { if (localSeen.has(s.stationuuid)) s._isLocal = true; }
   }
 
@@ -546,7 +586,7 @@ function render() {
 function cardHTML(s) {
   const id = esc(s.stationuuid);
   const br = s.bitrate ? `<span class="bitrate-tag">${s.bitrate}k</span>` : '';
-  const localBadge = s._isLocal ? '<div class="local-badge">LOCAL</div>' : '';
+  const localBadge = s._verified ? '<div class="verified-badge">✓ Verified</div>' : (s._isLocal ? '<div class="local-badge">LOCAL</div>' : '');
   const fallback = esc(s.name.trim().charAt(0).toUpperCase());
   const imgTag = s.favicon
     ? `<img src="${esc(s.favicon)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
