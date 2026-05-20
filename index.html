@@ -125,6 +125,14 @@
       font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
       text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
     }
+    .http-badge {
+      position: absolute; top: 10px; right: 10px;
+      background: #3a2a0a; color: #f0a030;
+      font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+      text-transform: uppercase; padding: 2px 6px; border-radius: 4px;
+    }
+    .card.http-only { opacity: 0.65; }
+    .card.http-only:hover { opacity: 0.85; }
     .lang-tag {
       display: inline-flex; align-items: center; gap: 3px;
       font-size: 11px; font-weight: 600;
@@ -278,42 +286,95 @@ const audio = document.getElementById('audio');
 let hlsInst = null;
 
 function isHLS(url) { return url && (url.includes('.m3u8') || url.includes('hls')); }
+function isHTTP(url) { return url && url.startsWith('http://'); }
+function onHTTPS()   { return location.protocol === 'https:'; }
+
+function getVol() { return parseFloat(document.getElementById('volume').value) || 0.8; }
 
 function attachStream(url) {
+  clearTimeout(connectTimer);
   if (hlsInst) { hlsInst.destroy(); hlsInst = null; }
-  audio.pause(); audio.src = '';
+
+  // Fully reset the audio element before switching streams
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  audio.muted = false;
+
+  // Warn if HTTP stream on an HTTPS page — will be blocked by browser
+  if (isHTTP(url) && onHTTPS()) {
+    setStatus('error', '⚠ HTTP blocked');
+    updatePlayIcon(false); playing = false;
+    return;
+  }
+
   if (Hls.isSupported() && isHLS(url)) {
     hlsInst = new Hls({
       maxBufferLength: 8, maxMaxBufferLength: 20, lowLatencyMode: true,
       liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 6,
-      manifestLoadingTimeOut: 8000, manifestLoadingMaxRetry: 3,
-      levelLoadingTimeOut: 8000, fragLoadingTimeOut: 12000, startLevel: -1,
+      manifestLoadingTimeOut: 10000, manifestLoadingMaxRetry: 2,
+      levelLoadingTimeOut: 10000, fragLoadingTimeOut: 15000, startLevel: -1,
     });
     hlsInst.loadSource(url);
     hlsInst.attachMedia(audio);
-    hlsInst.on(Hls.Events.MANIFEST_PARSED, () => audio.play().catch(() => {}));
+    hlsInst.on(Hls.Events.MANIFEST_PARSED, () => {
+      // Volume MUST be set here — HLS.js resets the media element on attach
+      audio.volume = getVol();
+      audio.muted = false;
+      audio.play().catch(() => {});
+    });
     hlsInst.on(Hls.Events.ERROR, (_, d) => {
-      if (d.fatal) { setStatus('error', '✕ Error'); updatePlayIcon(false); playing = false; }
+      if (d.fatal) {
+        if (retryCount < 2) {
+          retryCount++;
+          setStatus('retry', `↺ Retry ${retryCount}…`);
+          setTimeout(() => { if (currentStation) attachStream(bestUrl(currentStation)); }, 2500);
+        } else {
+          setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false;
+        }
+      }
     });
   } else if (audio.canPlayType('application/vnd.apple.mpegurl') && isHLS(url)) {
-    audio.src = url; audio.play().catch(() => {});
+    // Safari native HLS
+    audio.src = url; audio.volume = getVol(); audio.muted = false;
+    audio.play().catch(() => {});
   } else {
-    audio.src = url; audio.play().catch(() => {});
+    audio.src = url; audio.volume = getVol(); audio.muted = false;
+    audio.play().catch(() => {});
   }
+
+  // 15-second connection timeout — auto-retry if stream never fires 'playing'
+  connectTimer = setTimeout(() => {
+    if (!playing) {
+      if (retryCount < 2) {
+        retryCount++;
+        setStatus('retry', `↺ Timeout, retry ${retryCount}…`);
+        if (currentStation) attachStream(bestUrl(currentStation));
+      } else {
+        setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false;
+      }
+    }
+  }, 15000);
 }
 
-// ── Stall detection ───────────────────────────────────────────────────────────
-let lastTime = 0, stallTimer = null;
+// Pick the best URL — prefer HTTPS url_resolved over HTTP url
+function bestUrl(s) {
+  const candidates = [s.url_resolved, s.url].filter(Boolean);
+  return candidates.find(u => u.startsWith('https')) || candidates[0];
+}
+
+// ── Stall & connection timers ─────────────────────────────────────────────────
+let lastTime = 0, stallTimer = null, connectTimer = null;
 function startStallWatch() {
   clearInterval(stallTimer); lastTime = audio.currentTime;
   stallTimer = setInterval(() => {
     if (!playing) return;
     if (audio.currentTime === lastTime && !audio.paused) {
       setStatus('retry', '↺ Reconnecting…');
-      if (currentStation) attachStream(currentStation.url_resolved || currentStation.url);
+      if (currentStation) { retryCount = 0; attachStream(bestUrl(currentStation)); }
     }
     lastTime = audio.currentTime;
-  }, 8000);
+  }, 10000);
 }
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -344,6 +405,7 @@ const KARNATAKA_HARDCODED = [
     url: 'http://178.32.107.151:3711/stream',
     url_resolved: 'http://178.32.107.151:3711/stream',
     favicon: '', bitrate: 96, votes: 137, _isLocal: true, _verified: true,
+    _httpOnly: true,
   },
   // ── Bangalore ────────────────────────────────────────────────────────────────
   {
@@ -363,15 +425,6 @@ const KARNATAKA_HARDCODED = [
     url: 'https://a5.asurahosting.com:8600/radio.mp3',
     url_resolved: 'https://a5.asurahosting.com:8600/radio.mp3',
     favicon: '', bitrate: 128, votes: 0, _isLocal: false, _verified: true,
-  },
-  {
-    stationuuid: 'hc-sandesh-radio',
-    name: 'Sandesh Radio',
-    state: 'Karnataka', language: 'hindi,kannada',
-    tags: 'bangalore,classical,hindustani,indian classical music',
-    url: 'http://radio.garden/api/ara/content/listen/Myo7zNpV/channel.mp3',
-    url_resolved: 'http://radio.garden/api/ara/content/listen/Myo7zNpV/channel.mp3',
-    favicon: '', bitrate: 128, votes: 436, _isLocal: false, _verified: true,
   },
   // ── Other Karnataka ───────────────────────────────────────────────────────────
   {
@@ -637,7 +690,13 @@ function render() {
 function cardHTML(s) {
   const id = esc(s.stationuuid);
   const br = s.bitrate ? `<span class="bitrate-tag">${s.bitrate}k</span>` : '';
-  const localBadge = s._verified ? '<div class="verified-badge">✓ Verified</div>' : (s._isLocal ? '<div class="local-badge">LOCAL</div>' : '');
+  const url = bestUrl(s);
+  const httpBlocked = isHTTP(url) && onHTTPS();
+  const badge = httpBlocked
+    ? '<div class="http-badge">⚠ FM only</div>'
+    : s._verified
+      ? '<div class="verified-badge">✓ Verified</div>'
+      : s._isLocal ? '<div class="local-badge">LOCAL</div>' : '';
   const fallback = esc(s.name.trim().charAt(0).toUpperCase());
   const imgTag = s.favicon
     ? `<img src="${esc(s.favicon)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
@@ -647,10 +706,15 @@ function cardHTML(s) {
     ? `<span class="lang-tag">🗣 ${esc(langs.map(capitalise).join(', '))}</span>`
     : '';
   const stateLine = [s.state, s.tags ? s.tags.split(',')[0].trim() : ''].filter(Boolean).join(' · ');
+  const classes = [
+    'card',
+    currentId === s.stationuuid ? 'playing' : '',
+    s._isLocal ? 'local' : '',
+    httpBlocked ? 'http-only' : '',
+  ].filter(Boolean).join(' ');
   return `
-    <div class="card${currentId===s.stationuuid?' playing':''}${s._isLocal?' local':''}"
-         onclick="selectStation('${id}')" id="card-${id}">
-      ${localBadge}
+    <div class="${classes}" onclick="selectStation('${id}')" id="card-${id}">
+      ${badge}
       <div class="card-logo">
         ${imgTag}
         <span class="fallback" ${s.favicon?'style="display:none"':''}>${fallback}</span>
@@ -696,18 +760,21 @@ function selectStation(id) {
     || COUNTRIES[activeCountry]?.label || activeCountry;
 
   setStatus('loading', '⏳ Connecting…'); updatePlayIcon(false); playing = false;
-  audio.volume = parseFloat(document.getElementById('volume').value);
-  attachStream(s.url_resolved || s.url);
+  retryCount = 0;
+  attachStream(bestUrl(s));
   startStallWatch();
 }
 
 function togglePlay() {
   if (!currentId) return;
   if (playing) {
-    audio.pause(); updatePlayIcon(false); setStatus('', '—'); playing = false; clearInterval(stallTimer);
+    audio.pause();
+    updatePlayIcon(false); setStatus('', '—'); playing = false;
+    clearInterval(stallTimer); clearTimeout(connectTimer);
   } else {
+    retryCount = 0;
     setStatus('loading', '⏳ Connecting…');
-    attachStream(currentStation.url_resolved || currentStation.url);
+    attachStream(bestUrl(currentStation));
     startStallWatch();
   }
 }
@@ -716,18 +783,39 @@ function updatePlayIcon(p) {
   document.getElementById('playIcon').setAttribute('d', p ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
 }
 function setStatus(cls, text) { const el = document.getElementById('player-status'); el.className = cls; el.textContent = text; }
-function setVolume(v) { audio.volume = v; }
+function setVolume(v) {
+  const vol = parseFloat(v);
+  audio.volume = vol;
+  audio.muted = false;
+}
 
-audio.addEventListener('playing', () => { setStatus('live', '● LIVE'); updatePlayIcon(true); playing = true; });
-audio.addEventListener('waiting', () => { if (playing) setStatus('loading', '⏳ Buffering…'); });
+audio.addEventListener('playing', () => {
+  clearTimeout(connectTimer);
+  setStatus('live', '● LIVE'); updatePlayIcon(true); playing = true;
+});
+audio.addEventListener('waiting', () => {
+  if (playing) setStatus('loading', '⏳ Buffering…');
+});
 audio.addEventListener('error', () => {
+  // Don't double-retry if HLS.js already handles it
+  if (hlsInst) return;
   if (retryCount < 2) {
     retryCount++;
     setStatus('retry', `↺ Retry ${retryCount}…`);
-    setTimeout(() => { if (currentStation) attachStream(currentStation.url_resolved || currentStation.url); }, 2000);
-  } else { setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false; }
+    setTimeout(() => {
+      if (currentStation) attachStream(bestUrl(currentStation));
+    }, 2500);
+  } else {
+    setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false;
+  }
 });
 audio.addEventListener('pause', () => { if (!playing) updatePlayIcon(false); });
+audio.addEventListener('volumechange', () => {
+  // Keep slider in sync if something else changes volume
+  const vol = audio.volume;
+  const slider = document.getElementById('volume');
+  if (Math.abs(parseFloat(slider.value) - vol) > 0.01) slider.value = vol;
+});
 
 loadCountry('India');
 </script>
