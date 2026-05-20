@@ -270,6 +270,11 @@
         <path id="playIcon" d="M8 5v14l11-7z"/>
       </svg>
     </button>
+    <button class="ctrl-btn" title="Next station" onclick="nextStation()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+      </svg>
+    </button>
   </div>
   <div class="volume-wrap">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--muted)">
@@ -330,7 +335,8 @@ function attachStream(url) {
           setStatus('retry', `↺ Retry ${retryCount}…`);
           setTimeout(() => { if (currentStation) attachStream(bestUrl(currentStation)); }, 2500);
         } else {
-          setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false;
+          setStatus('error', '✕ Skipping…'); updatePlayIcon(false); playing = false;
+          setTimeout(nextStation, 1800);
         }
       }
     });
@@ -351,7 +357,8 @@ function attachStream(url) {
         setStatus('retry', `↺ Timeout, retry ${retryCount}…`);
         if (currentStation) attachStream(bestUrl(currentStation));
       } else {
-        setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false;
+        setStatus('error', '✕ Skipping…'); updatePlayIcon(false); playing = false;
+        setTimeout(nextStation, 1800);
       }
     }
   }, 15000);
@@ -528,7 +535,15 @@ async function loadCountry(country) {
     }
   }
 
-  stations = [...seen.values()];
+  let pool = [...seen.values()];
+
+  // On HTTPS pages, HTTP-only streams are blocked by browsers as mixed content.
+  // Remove them from the browsable list entirely (they still show via hardcoded with badge).
+  if (onHTTPS()) {
+    pool = pool.filter(s => !isHTTP(bestUrl(s)) || s._httpOnly);
+  }
+
+  stations = pool;
   localPicks = [];
 
   if (country === 'India') {
@@ -779,6 +794,13 @@ function togglePlay() {
   }
 }
 
+function nextStation() {
+  if (!filtered.length) return;
+  const idx = filtered.findIndex(s => s.stationuuid === currentId);
+  const next = filtered[(idx + 1) % filtered.length];
+  if (next) selectStation(next.stationuuid);
+}
+
 function updatePlayIcon(p) {
   document.getElementById('playIcon').setAttribute('d', p ? 'M6 19h4V5H6v14zm8-14v14h4V5h-4z' : 'M8 5v14l11-7z');
 }
@@ -797,8 +819,7 @@ audio.addEventListener('waiting', () => {
   if (playing) setStatus('loading', '⏳ Buffering…');
 });
 audio.addEventListener('error', () => {
-  // Don't double-retry if HLS.js already handles it
-  if (hlsInst) return;
+  if (hlsInst) return; // HLS.js handles its own errors
   if (retryCount < 2) {
     retryCount++;
     setStatus('retry', `↺ Retry ${retryCount}…`);
@@ -806,7 +827,8 @@ audio.addEventListener('error', () => {
       if (currentStation) attachStream(bestUrl(currentStation));
     }, 2500);
   } else {
-    setStatus('error', '✕ Failed'); updatePlayIcon(false); playing = false;
+    setStatus('error', '✕ Skipping…'); updatePlayIcon(false); playing = false;
+    setTimeout(nextStation, 1800);
   }
 });
 audio.addEventListener('pause', () => { if (!playing) updatePlayIcon(false); });
