@@ -515,7 +515,7 @@ async function loadCountry(country) {
   const results = await Promise.all(fetches);
   const main = results[0];
 
-  if (!main.length) {
+  if (!main.length && country !== 'India') {
     document.getElementById('status').innerHTML = '<div style="color:#f87171">Could not load. Check your connection.</div>';
     return;
   }
