@@ -395,15 +395,9 @@ let activeCountry = 'India';
 // Hardcoded verified Karnataka stations — Radio Browser has only 5 tagged entries for this state
 const KARNATAKA_HARDCODED = [
   // ── Mangalore / Coastal ──────────────────────────────────────────────────────
-  {
-    stationuuid: 'hc-air-mangalore',
-    name: 'AIR Mangalore (Akashvani)',
-    state: 'Karnataka', language: 'kannada,tulu,konkani',
-    tags: 'mangalore,mangaluru,air,akashvani,coastal karnataka',
-    url: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio073/playlist.m3u8',
-    url_resolved: 'https://air.pc.cdn.bitgravity.com/air/live/pbaudio073/playlist.m3u8',
-    favicon: '', bitrate: 48, votes: 999, _isLocal: true, _verified: true,
-  },
+  // AIR Mangalore removed: pbaudio073 stream ID is dead (confirmed by user testing).
+  // AIR rotates bitgravity pbaudio IDs periodically; re-add once a current working
+  // .m3u8 URL is found (e.g. via DevTools Network tab on newsonair.gov.in/regional-audio).
   {
     stationuuid: 'hc-amchi-konkani',
     name: 'Radio AmchiKONKANI',
